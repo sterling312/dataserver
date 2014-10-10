@@ -13,7 +13,6 @@ from tornado.wsgi import WSGIContainer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, query
 from sqlalchemy.ext.automap import automap_base, AutomapBase
-import flask_app
 import url
 
 class ArgsParse(argparse.ArgumentParser):
