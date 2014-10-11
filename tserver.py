@@ -6,6 +6,7 @@ import argparse
 import logging
 from logging.handlers import RotatingFileHandler
 from pandas import Series, DataFrame
+from redis import Redis
 from tornado.ioloop import IOLoop
 from tornado.httpserver import HTTPServer
 from tornado.web import Application, RequestHandler, StaticFileHandler, FallbackHandler, HTTPError
@@ -36,6 +37,7 @@ class Server(Application):
     def __init__(self, **settings):
         """setting gets passed into tornado.web.Applicatbon"""
         self.logger = logging.getLogger('server')
+        self.cache = Redis()
         self.engine = None
         self.Session = None
         self.templates = settings.get('templates', 'templates')
@@ -90,7 +92,9 @@ class Server(Application):
             app.static_folder = self.static
             app.template_folder = self.templates
             wsgiapp = WSGIContainer(app)
-            self.handlers.append(('/{}/.*'.format(app.__name__), FallbackHandler, dict(fallback=wsgiapp)))
+            self.handlers.append(('/{}/.*'.format(app.__name__), 
+                                  FallbackHandler, 
+                                  dict(fallback=wsgiapp)))
 
 class Query(query.Query):
     def __init__(self, table, session):
@@ -152,11 +156,16 @@ class DBAPI(RequestHandler):
 
     def get(self):
         orm, kwargs = self.parse_query()
-        sess = self.application.Session()
-        objs = sess.query(orm).filter_by(**kwargs).all() if kwargs else sess.query(orm).all()
-        objs = [ORMBase.to_dict(i) for i in objs]
-        self.write(json.dumps(objs))
-        sess.close()
+        if orm.__tablename__ in self.application.cache.keys():
+            js = self.application.cache.get(orm.__tablename__)
+        else:
+            orm_sess = self.application.Session()
+            objs = orm_sess.query(orm).filter_by(**kwargs).all() if kwargs else orm_sess.query(orm).all()
+            objs = [ORMBase.to_dict(i) for i in objs]
+            js = json.dumps(objs)
+            self.application.cache.set(orm.__tablename__,js,ex=60*60)
+        self.write(js)
+        orm_sess.close()
         self.finish()
 
     def post(self):
